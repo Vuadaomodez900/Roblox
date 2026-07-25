@@ -10,7 +10,7 @@ local SilentAim = {
     TargetPart = "Head",
     MaxRange = 500,
     TeamCheck = true,   -- true = only hit enemies
-    VisibilityCheck = false,  -- false = shoot through walls
+    VisibilityCheck = true,  -- false = shoot through walls
     FOV = 360,          -- degrees, 360 = no FOV limit
 }
 
