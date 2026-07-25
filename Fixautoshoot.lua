@@ -20,7 +20,7 @@ local Config = {
     Range          = 800,
     FOV            = 360,
     TeamCheck      = true,
-    WallCheck      = false,
+    WallCheck      = true,
     AutoFire       = true,
     FireRate       = 0.06,
     HitChance      = 100,
@@ -84,7 +84,7 @@ local AntiBan = {
 -- DELTA X DETECTION
 -- ============================================
 local DeltaX = {
-    Loaded   = false,
+    Loaded   = true,
     Version  = "Unknown",
     Platform = "Unknown",
 }
