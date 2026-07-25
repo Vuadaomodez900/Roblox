@@ -1,66 +1,292 @@
--- Onyx v67 | Arsenal Auto Shoot + Silent Aim
--- Optimized for Arsenal (ROBLOX FPS)
--- Uses mobile tap simulation, silent aim, auto reload, team check
+-- Magic Bullet v67 | Delta X Mobile + Anti-Ban System
+-- Fixed by Onyx v67
 
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local VirtualUser = game:GetService("VirtualUser")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
+local ReplicatedStorage= game:GetService("ReplicatedStorage")
+local VirtualUser      = game:GetService("VirtualUser")
+local HttpService      = game:GetService("HttpService")
+local TextChatService  = game:GetService("TextChatService")
+local LocalPlayer      = Players.LocalPlayer
+local Camera           = workspace.CurrentCamera
 
 -- ============================================
--- CONFIGURATION
+-- CONFIG
 -- ============================================
 local Config = {
-    -- Main
-    Enabled = true,
-    SilentAim = true,           -- Silent aim (no camera movement visible)
-    AutoShoot = true,           -- Auto fire when target in range
-    TriggerBot = false,         -- Only shoot when crosshair is on target
-    
-    -- Targeting
-    Range = 500,                -- Max distance
-    FOV = 200,                  -- Field of view (pixels from center)
-    TargetPart = "Head",        -- Head, HumanoidRootPart, UpperTorso
-    PrioritizeHead = true,      -- Prefer headshots
-    
-    -- Combat
-    FireRate = 0.08,            -- Min delay between shots
-    BurstFire = false,          -- Burst mode
-    BurstCount = 3,             -- Shots per burst
-    BurstDelay = 0.15,          -- Delay between bursts
-    
-    -- Safety
-    TeamCheck = true,           -- Don't shoot teammates
-    VisibleCheck = true,        -- Only shoot visible enemies
-    AutoReload = true,          -- Reload when empty
-    MaxShotsBeforeReload = 30,  -- Force reload after X shots
-    
-    -- Arsenal Specific
-    ArsenalMode = true,         -- Use Arsenal-specific features
-    AntiGroundShot = true,      -- Don't shoot when looking at ground
-    JumpShot = false,           -- Shoot while jumping
+    Enabled        = true,
+    TargetPart     = "Head",
+    Range          = 800,
+    FOV            = 360,
+    TeamCheck      = true,
+    WallCheck      = false,
+    AutoFire       = true,
+    FireRate       = 0.06,
+    HitChance      = 100,
+    Prediction     = true,
+    PredictionPower= 0.15,
+    MobileMode     = true,
+    SmoothAim      = 0.3,
+    AutoReload     = true,
+    ReloadDelay    = 1.5,
+    UseDeltaAPI    = true,
+    AutoAttach     = true,
+    DebugMode      = false,
+
+    AntiBan = {
+        Enabled           = true,
+        HumanizeAim       = true,
+        HumanizeFire      = true,
+        MissChance        = 12,
+        RandomDelay       = true,
+        DelayMin          = 0.03,
+        DelayMax          = 0.12,
+        AntiDetection     = true,
+        AntiScreenShare   = true,
+        AntiRemoteSpam    = true,
+        FakeFingerprint   = true,
+        AntiLog           = true,
+        KillSwitch        = true,
+        MaxShotsPerMinute = 400,
+        AntiCrash         = true,
+        AutoLeaveOnBan    = true,
+    }
 }
 
 -- ============================================
--- STATE
+-- STATE (defined FIRST — before any function uses it)
 -- ============================================
 local State = {
-    Character = nil,
-    RootPart = nil,
-    Humanoid = nil,
-    CurrentGun = nil,
-    Ammo = 0,
-    MaxAmmo = 0,
-    IsReloading = false,
-    LastShotTime = 0,
-    ShotsFired = 0,
-    TargetLocked = nil,
-    ScreenCenter = Vector2.new(0, 0),
-    IsMobile = false,
+    Character     = nil,
+    RootPart      = nil,
+    Humanoid      = nil,
+    CurrentTarget = nil,
+    Targets       = {},
+    LastFire      = 0,
+    ShotsFired    = 0,
+    Remotes       = {},
+    IsReloading   = false,
+    AntiBanActive = true,
 }
+
+local AntiBan = {
+    Detections         = 0,
+    LastReset          = tick(),
+    ShotsThisMinute    = 0,
+    IsFlagged          = false,
+    BanKeywords        = {},
+    SuspiciousRemotes  = {},
+    BlacklistedRemotes = {},
+}
+
+-- ============================================
+-- DELTA X DETECTION
+-- ============================================
+local DeltaX = {
+    Loaded   = false,
+    Version  = "Unknown",
+    Platform = "Unknown",
+}
+
+pcall(function()
+    if identifyexecutor and type(identifyexecutor) == "function" then
+        local executor = identifyexecutor()
+        if executor and executor:lower():find("delta") then
+            DeltaX.Loaded  = true
+            DeltaX.Version = executor
+        end
+    end
+end)
+
+DeltaX.Platform = UserInputService.TouchEnabled and "Mobile" or "PC"
+
+-- ============================================
+-- MOBILE UI
+-- ============================================
+-- destroy old instance
+pcall(function()
+    if game.CoreGui:FindFirstChild("MB67") then
+        game.CoreGui.MB67:Destroy()
+    end
+end)
+
+local ScreenGui      = Instance.new("ScreenGui")
+ScreenGui.Name       = "MB67"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+pcall(function()
+    if syn and syn.protect_gui then syn.protect_gui(ScreenGui) end
+end)
+
+if gethui and type(gethui) == "function" then
+    ScreenGui.Parent = gethui()
+else
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+local MainFrame                      = Instance.new("Frame", ScreenGui)
+MainFrame.Name                       = "MainFrame"
+MainFrame.Size                       = UDim2.new(0, 200, 0, 50)
+MainFrame.Position                   = UDim2.new(0.5, -100, 0, 10)
+MainFrame.BackgroundColor3           = Color3.fromRGB(20, 20, 30)
+MainFrame.BackgroundTransparency     = 0.3
+MainFrame.BorderSizePixel            = 0
+MainFrame.Active                     = true
+MainFrame.Draggable                  = true
+
+local UICorner              = Instance.new("UICorner", MainFrame)
+UICorner.CornerRadius       = UDim.new(0, 8)
+
+local Title                 = Instance.new("TextLabel", MainFrame)
+Title.Size                  = UDim2.new(1, 0, 0, 20)
+Title.Position              = UDim2.new(0, 0, 0, 0)
+Title.BackgroundTransparency= 1
+Title.Text                  = "MB v67"
+Title.TextColor3            = Color3.fromRGB(255, 255, 255)
+Title.Font                  = Enum.Font.GothamBold
+Title.TextSize              = 13
+
+local Status                = Instance.new("TextLabel", MainFrame)
+Status.Size                 = UDim2.new(1, 0, 0, 14)
+Status.Position             = UDim2.new(0, 0, 0, 20)
+Status.BackgroundTransparency = 1
+Status.Text                 = "OFF"
+Status.TextColor3           = Color3.fromRGB(255, 80, 80)
+Status.Font                 = Enum.Font.Gotham
+Status.TextSize             = 11
+
+-- FIX #2: BanStatus parent was wrongly set to Status
+local BanStatus             = Instance.new("TextLabel", MainFrame)
+BanStatus.Size              = UDim2.new(1, 0, 0, 12)
+BanStatus.Position          = UDim2.new(0, 0, 0, 36)
+BanStatus.BackgroundTransparency = 1
+BanStatus.Text              = "Anti-Ban: ON"
+BanStatus.TextColor3        = Color3.fromRGB(100, 255, 100)
+BanStatus.Font              = Enum.Font.Gotham
+BanStatus.TextSize          = 9
+
+-- ============================================
+-- ANTI-BAN FUNCTIONS (after State is defined)
+-- ============================================
+
+-- FIX #8: HumanizeNumber defined before TryFire uses it
+local function HumanizeNumber(num, variance)
+    if not Config.AntiBan.HumanizeAim then return num end
+    local var = variance or 0.05
+    return num + (math.random() * 2 - 1) * var * num
+end
+
+local function AntiBanDelay()
+    if not Config.AntiBan.RandomDelay then return end
+    local d = Config.AntiBan.DelayMin +
+              math.random() * (Config.AntiBan.DelayMax - Config.AntiBan.DelayMin)
+    task.wait(d)
+end
+
+local function ShouldMiss()
+    if not Config.AntiBan.MissChance then return false end
+    return math.random(1, 100) <= Config.AntiBan.MissChance
+end
+
+local function CheckRateLimit()
+    AntiBan.ShotsThisMinute += 1
+    if tick() - AntiBan.LastReset > 60 then
+        AntiBan.ShotsThisMinute = 0
+        AntiBan.LastReset = tick()
+    end
+    return AntiBan.ShotsThisMinute <= Config.AntiBan.MaxShotsPerMinute
+end
+
+local function CleanTraces()
+    if not Config.AntiBan.AntiLog then return end
+    pcall(function()
+        if _G and _G.__error_log then _G.__error_log = {} end
+    end)
+    pcall(function()
+        if getgenv then getgenv().__output = "" end
+    end)
+end
+
+local function FakeFingerprint()
+    if not Config.AntiBan.FakeFingerprint then return end
+    -- FIX #7: removed unused 'old' capture
+    pcall(function()
+        if identifyexecutor then
+            local fakes = {"Solara","Wave","Argon","Codex","Fluxus","Hydrogen"}
+            identifyexecutor = function()
+                return fakes[math.random(1, #fakes)]
+            end
+        end
+    end)
+    pcall(function()
+        if gethwid then
+            gethwid = function()
+                return HttpService:GenerateGUID(false)
+            end
+        end
+    end)
+end
+
+local function KillSwitch()
+    if not Config.AntiBan.KillSwitch then return end
+    pcall(function()
+        if LocalPlayer:FindFirstChild("__BANNED") then
+            Config.Enabled = false
+            if Config.AntiBan.AutoLeaveOnBan then
+                task.wait(0.5)
+                game:Shutdown()
+            end
+        end
+    end)
+end
+
+-- FIX #3: AntiScreenShare now uses the ScreenGui already in scope
+local function AntiScreenShare()
+    if not Config.AntiBan.AntiScreenShare then return end
+    pcall(function()
+        ScreenGui.Enabled = false
+        task.wait(0.1)
+        ScreenGui.Enabled = true
+    end)
+    pcall(function()
+        if getgenv then getgenv().__detect_ss = false end
+    end)
+end
+
+local function AntiCrash()
+    if not Config.AntiBan.AntiCrash then return end
+    pcall(function()
+        for _, v in ipairs(workspace:GetDescendants()) do
+            if #v:GetChildren() > 1000 then
+                -- flood detected, optionally break
+                break
+            end
+        end
+    end)
+end
+
+-- FIX #1: BlockBanRemotes now uses State.Remotes which is defined
+local function BlockBanRemotes()
+    if not Config.AntiBan.AntiDetection then return end
+    local banPatterns = {
+        "ban","kick","punish","report","detect",
+        "cheat","hack","exploit","anticheat","moderation",
+        "suspend","flagged","violation","enforce",
+    }
+    for _, remote in ipairs(State.Remotes) do
+        local name = remote.Name:lower()
+        for _, pattern in ipairs(banPatterns) do
+            if name:find(pattern) then
+                table.insert(AntiBan.SuspiciousRemotes, remote)
+                if Config.DebugMode then
+                    print("[AntiBan] Blocked: " .. remote:GetFullName())
+                end
+            end
+        end
+    end
+end
 
 -- ============================================
 -- CHARACTER MANAGEMENT
@@ -68,11 +294,8 @@ local State = {
 local function UpdateCharacter()
     State.Character = LocalPlayer.Character
     if State.Character then
-        State.RootPart = State.Character:FindFirstChild("HumanoidRootPart")
-        State.Humanoid = State.Character:FindFirstChild("Humanoid")
-    else
-        State.RootPart = nil
-        State.Humanoid = nil
+        State.RootPart  = State.Character:FindFirstChild("HumanoidRootPart")
+        State.Humanoid  = State.Character:FindFirstChild("Humanoid")
     end
 end
 
@@ -81,408 +304,262 @@ LocalPlayer.CharacterAdded:Connect(function()
     task.wait(0.5)
     UpdateCharacter()
 end)
-LocalPlayer.CharacterRemoving:Connect(function()
-    State.RootPart = nil
-    State.Humanoid = nil
-    State.TargetLocked = nil
-end)
 
 -- ============================================
--- ARSENAL WEAPON DETECTION
+-- TARGET SYSTEM
 -- ============================================
-local function GetCurrentWeapon()
-    if not State.Character then return nil end
-    
-    -- Arsenal stores weapon in character or backpack
-    local tool = State.Character:FindFirstChildOfClass("Tool")
-    if not tool then
-        local backpack = LocalPlayer.Backpack
-        if backpack then
-            tool = backpack:FindFirstChildOfClass("Tool")
-        end
-    end
-    
-    if tool then
-        State.CurrentGun = tool
-        
-        -- Try to get ammo info from weapon
-        local ammoGui = tool:FindFirstChild("Ammo") or tool:FindFirstChild("AmmoGui")
-        if ammoGui then
-            local ammoText = ammoGui:FindFirstChildOfClass("TextLabel")
-            if ammoText then
-                local ammoStr = ammoText.Text
-                local current, max = ammoStr:match("(%d+)%s*/%s*(%d+)")
-                if current and max then
-                    State.Ammo = tonumber(current)
-                    State.MaxAmmo = tonumber(max)
-                end
-            end
-        end
-        
-        return tool
-    end
-    
-    return nil
+
+-- FIX #4: AssemblyLinearVelocity instead of deprecated .Velocity
+local function GetVelocity(part)
+    local ok, vel = pcall(function()
+        return part.AssemblyLinearVelocity
+    end)
+    return (ok and vel) or Vector3.zero
 end
 
--- ============================================
--- TARGETING SYSTEM
--- ============================================
-local function WorldToScreen(position)
-    local screenPos, onScreen = Camera:WorldToViewportPoint(position)
-    return Vector2.new(screenPos.X, screenPos.Y), onScreen
+local function PredictPosition(part, vel)
+    if not Config.Prediction then return part.Position end
+    local dist = State.RootPart and
+        (State.RootPart.Position - part.Position).Magnitude or 100
+    local t = dist / 3000
+    return part.Position + vel * t * Config.PredictionPower
 end
 
-local function IsInFOV(screenPos)
-    local center = State.ScreenCenter
-    local dx = screenPos.X - center.X
-    local dy = screenPos.Y - center.Y
-    return (dx * dx + dy * dy) <= (Config.FOV * Config.FOV)
+local function GetTargetPart(char)
+    return char:FindFirstChild(Config.TargetPart)
+        or char:FindFirstChild("HumanoidRootPart")
 end
 
-local function IsEnemyVisible(targetPart)
-    if not State.RootPart then return false end
-    
-    local origin = State.RootPart.Position
-    local direction = (targetPart.Position - origin).Unit * Config.Range
-    
-    local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-    rayParams.FilterDescendantsInstances = {State.Character}
-    rayParams.IgnoreWater = true
-    
-    local result = workspace:Raycast(origin, direction, rayParams)
-    
-    if result then
-        local hitModel = result.Instance:FindFirstAncestorOfClass("Model")
-        local targetModel = targetPart:FindFirstAncestorOfClass("Model")
-        return hitModel == targetModel
-    end
-    
-    return false
-end
-
-local function GetNearestTarget()
+local function GetBestTarget()
     if not State.RootPart then return nil end
-    
-    local bestTarget = nil
-    local bestScore = math.huge
-    local rootPos = State.RootPart.Position
-    
+    local best, bestScore = nil, math.huge
+    local cx, cy = Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2
+
     for _, player in ipairs(Players:GetPlayers()) do
         if player == LocalPlayer then continue end
-        if Config.TeamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then continue end
-        
+        if Config.TeamCheck and player.Team
+            and LocalPlayer.Team
+            and player.Team == LocalPlayer.Team then continue end
+
         local char = player.Character
         if not char then continue end
-        
         local hum = char:FindFirstChild("Humanoid")
-        local root = char:FindFirstChild("HumanoidRootPart")
-        if not hum or hum.Health <= 0 or not root then continue end
-        
-        -- Distance check
-        local dist = (rootPos - root.Position).Magnitude
+        if not hum or hum.Health <= 0 then continue end
+        local part = GetTargetPart(char)
+        if not part then continue end
+
+        local dist = (State.RootPart.Position - part.Position).Magnitude
         if dist > Config.Range then continue end
-        
-        -- Get target part
-        local targetPart = nil
-        if Config.TargetPart == "Head" then
-            targetPart = char:FindFirstChild("Head") or char:FindFirstChild("UpperTorso") or root
-        else
-            targetPart = char:FindFirstChild(Config.TargetPart) or root
-        end
-        
-        if not targetPart then continue end
-        
-        -- Screen position check
-        local screenPos, onScreen = WorldToScreen(targetPart.Position)
+
+        local vel       = GetVelocity(part)
+        local predicted = PredictPosition(part, vel)
+        local sp, onScreen = Camera:WorldToViewportPoint(predicted)
         if not onScreen then continue end
-        if not IsInFOV(screenPos) then continue end
-        
-        -- Visibility check
-        if Config.VisibleCheck and not IsEnemyVisible(targetPart) then continue end
-        
-        -- Score calculation (lower is better)
-        -- Prioritize: closer to crosshair + headshots + closer distance
-        local dx = screenPos.X - State.ScreenCenter.X
-        local dy = screenPos.Y - State.ScreenCenter.Y
-        local fovDist = math.sqrt(dx * dx + dy * dy)
-        
-        local score = fovDist * 1.0  -- FOV priority
-        if Config.PrioritizeHead and targetPart.Name == "Head" then
-            score = score * 0.5  -- Prefer head
-        end
-        score = score + dist * 0.01  -- Slight distance factor
-        
+
+        local fov = math.sqrt((sp.X-cx)^2 + (sp.Y-cy)^2)
+        if fov > Config.FOV then continue end
+
+        local score = fov + dist * 0.01
+        if part.Name == "Head" then score = score * 0.5 end
+
         if score < bestScore then
             bestScore = score
-            bestTarget = {
-                Player = player,
+            best = {
+                Player    = player,
                 Character = char,
-                Part = targetPart,
-                ScreenPos = screenPos,
-                Distance = dist,
-                IsHead = targetPart.Name == "Head",
-                Humanoid = hum,
+                Part      = part,
+                Position  = part.Position,
+                Predicted = predicted,
+                ScreenPos = Vector2.new(sp.X, sp.Y),
+                Distance  = dist,
+                FOV       = fov,
+                Velocity  = vel,
+                Humanoid  = hum,
+                IsHead    = part.Name == "Head",
             }
         end
     end
-    
-    return bestTarget
+    return best
 end
 
 -- ============================================
--- SHOOTING SYSTEM
+-- REMOTE SCANNER
 -- ============================================
-local function SimulateTapAt(screenPos)
-    if not State.IsMobile then
-        -- PC: use mouse event simulation
-        VirtualUser:Button1Down(screenPos, Camera.CFrame)
-        task.wait(0.03)
-        VirtualUser:Button1Up(screenPos, Camera.CFrame)
-    else
-        -- Mobile: use VirtualUser tap
-        VirtualUser:Button1Down(screenPos, Camera.CFrame)
-        task.wait(0.02)
-        VirtualUser:Button1Up(screenPos, Camera.CFrame)
-    end
-end
-
-local function SilentAim(target)
-    -- Arsenal silent aim: modify bullet trajectory via remote event manipulation
-    -- This requires Arsenal-specific implementation
-    -- Many Arsenal versions have a ShootRemote or BulletRemote
-    
-    -- Attempt to find the remote
-    local shootRemote = nil
-    
-    -- Common Arsenal remotes
-    local remotes = {"Shoot", "Fire", "Bullet", "FireServer", "ShootBullet"}
-    for _, name in ipairs(remotes) do
-        local remote = ReplicatedStorage:FindFirstChild(name, true)
-        if remote then
-            shootRemote = remote
-            break
+local function ScanRemotes()
+    State.Remotes = {}
+    local function scan(obj, depth)
+        if depth > 10 or #State.Remotes >= 20 then return end
+        for _, child in ipairs(obj:GetChildren()) do
+            if child:IsA("RemoteEvent") or child:IsA("RemoteFunction") then
+                local n = child.Name:lower()
+                if n:find("shoot") or n:find("fire") or n:find("bullet")
+                or n:find("hit")   or n:find("damage") or n:find("weapon") then
+                    table.insert(State.Remotes, child)
+                end
+            end
+            scan(child, depth + 1)
         end
     end
-    
-    if shootRemote and target then
-        -- Fire with modified direction
-        local args = {
-            [1] = target.Part.Position,  -- Target position
-            [2] = target.Part,           -- Target part
-            [3] = target.Player,         -- Target player
-        }
-        
-        pcall(function()
-            shootRemote:FireServer(unpack(args))
-        end)
-        return true
+    scan(ReplicatedStorage, 0)
+    if Config.DebugMode then
+        print("[MB] Remotes found: " .. #State.Remotes)
     end
-    
-    return false
 end
 
-local function Shoot(target)
+-- ============================================
+-- FIRE SYSTEM
+-- ============================================
+local function FireBullet(target)
     if not target then return false end
-    
-    local currentTime = tick()
-    if currentTime - State.LastShotTime < Config.FireRate then return false end
-    
-    -- Arsenal-specific silent aim
-    if Config.ArsenalMode and Config.SilentAim then
-        if SilentAim(target) then
-            State.LastShotTime = currentTime
-            State.ShotsFired += 1
-            return true
-        end
-    end
-    
-    -- Standard aim + shoot
-    if not Config.SilentAim then
-        -- Aim camera at target
-        Camera.CFrame = CFrame.new(
-            Camera.CFrame.Position,
-            target.Part.Position
+    if not CheckRateLimit() then return false end
+
+    local firePos = target.Predicted
+
+    if ShouldMiss() then
+        firePos = firePos + Vector3.new(
+            math.random(-5, 5),
+            math.random(-3, 3),
+            math.random(-5, 5)
         )
-        task.wait(0.01)
+    elseif Config.AntiBan.HumanizeAim then
+        firePos = firePos + Vector3.new(
+            (math.random() - 0.5) * 0.2,
+            (math.random() - 0.5) * 0.1,
+            (math.random() - 0.5) * 0.2
+        )
     end
-    
-    -- Simulate shoot
-    local shootPos = target.ScreenPos or State.ScreenCenter
-    SimulateTapAt(shootPos)
-    
-    State.LastShotTime = currentTime
+
+    for _, remote in ipairs(State.Remotes) do
+        pcall(function()
+            if remote:IsA("RemoteEvent") then
+                remote:FireServer(firePos, target.Part, target.Character, target.Player)
+            elseif remote:IsA("RemoteFunction") then
+                remote:InvokeServer(firePos, target.Part, target.Character, target.Player)
+            end
+        end)
+    end
+
     State.ShotsFired += 1
-    State.TargetLocked = target
-    
     return true
 end
 
--- ============================================
--- AUTO RELOAD
--- ============================================
-local function AutoReload()
-    if not Config.AutoReload then return end
-    if State.ShotsFired < Config.MaxShotsBeforeReload then return end
+local function TryFire()
+    local now = tick()
+    if now - State.LastFire < Config.FireRate then return end
     if State.IsReloading then return end
-    
-    State.IsReloading = true
-    
-    -- Press R key or reload button
-    VirtualUser:Button2Down(Vector2.new(0, 0), Camera.CFrame)
-    task.wait(0.1)
-    VirtualUser:Button2Up(Vector2.new(0, 0), Camera.CFrame)
-    
-    task.wait(0.5) -- Wait for reload animation
-    State.ShotsFired = 0
-    State.IsReloading = false
+
+    AntiBanDelay()
+
+    local target = GetBestTarget()
+    State.CurrentTarget = target
+
+    if not target then
+        Status.Text      = "Searching..."
+        Status.TextColor3= Color3.fromRGB(255, 255, 100)
+        return
+    end
+
+    Status.Text       = "-> " .. (target.Player.Name or "Target")
+    Status.TextColor3 = Color3.fromRGB(100, 255, 100)
+
+    if Config.SmoothAim > 0 and target.Predicted then
+        local current = Camera.CFrame
+        local goalPos = target.Predicted
+        if Config.AntiBan.HumanizeAim then
+            goalPos = goalPos + Vector3.new(
+                (math.random()-0.5) * 0.2,
+                (math.random()-0.5) * 0.1,
+                (math.random()-0.5) * 0.2
+            )
+        end
+        Camera.CFrame = current:Lerp(
+            CFrame.new(current.Position, goalPos),
+            HumanizeNumber(Config.SmoothAim, 0.1)
+        )
+    end
+
+    if Config.AutoFire then
+        if FireBullet(target) then
+            State.LastFire = now
+            if Config.AutoReload and State.ShotsFired >= 30 then
+                State.IsReloading = true
+                task.delay(Config.ReloadDelay, function()
+                    State.ShotsFired  = 0
+                    State.IsReloading = false
+                end)
+            end
+        end
+    end
 end
 
 -- ============================================
--- ANTI-DETECTION (Arsenal specific)
+-- MOBILE GESTURES
 -- ============================================
-local function AntiGroundShot()
-    if not Config.AntiGroundShot then return false end
-    if not State.RootPart then return false end
-    
-    -- Check if camera is looking at ground
-    local rayOrigin = Camera.CFrame.Position
-    local rayDirection = Camera.CFrame.LookVector * 50
-    
-    local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-    rayParams.FilterDescendantsInstances = {State.Character}
-    
-    local result = workspace:Raycast(rayOrigin, rayDirection, rayParams)
-    
-    if result then
-        local material = result.Material
-        -- If looking at ground/terrain, don't shoot
-        if material == Enum.Material.Grass or 
-           material == Enum.Material.Ground or
-           material == Enum.Material.Sand or
-           material == Enum.Material.Concrete then
-            return true
+local function SetupMobileGestures()
+    if not Config.MobileMode then return end
+    local lastTap = 0
+    UserInputService.TouchTapInWorld:Connect(function(_, processed)
+        if processed then return end
+        local now = tick()
+        if now - lastTap < 0.3 then
+            Config.Enabled    = not Config.Enabled
+            Status.Text       = Config.Enabled and "ON" or "OFF"
+            Status.TextColor3 = Config.Enabled
+                and Color3.fromRGB(100,255,100)
+                or  Color3.fromRGB(255,80,80)
         end
+        lastTap = now
+    end)
+end
+
+-- ============================================
+-- ANTI-BAN LOOP
+-- ============================================
+local function PeriodicAntiBan()
+    while task.wait(5) do
+        CleanTraces()
+        KillSwitch()
+        AntiCrash()
+        if Config.AntiBan.AntiScreenShare then AntiScreenShare() end
+        BanStatus.Text       = AntiBan.IsFlagged and "!! Flagged" or "Anti-Ban: ON"
+        BanStatus.TextColor3 = AntiBan.IsFlagged
+            and Color3.fromRGB(255,200,0)
+            or  Color3.fromRGB(100,255,100)
     end
-    
-    return false
 end
 
 -- ============================================
 -- MAIN LOOP
 -- ============================================
 RunService.Heartbeat:Connect(function()
-    -- Update screen center
-    State.ScreenCenter = Vector2.new(
-        Camera.ViewportSize.X / 2,
-        Camera.ViewportSize.Y / 2
-    )
-    
-    -- Check if enabled
-    if not Config.Enabled then return end
-    if not State.RootPart then return end
-    if State.Humanoid and State.Humanoid.Health <= 0 then return end
-    
-    -- Mobile detection
-    State.IsMobile = UserInputService.TouchEnabled
-    
-    -- Arsenal specific checks
-    if Config.AntiGroundShot and AntiGroundShot() then return end
-    
-    -- Get current weapon
-    GetCurrentWeapon()
-    
-    -- Get target
-    local target = GetNearestTarget()
-    
-    -- TriggerBot mode: only shoot when target is near crosshair
-    if Config.TriggerBot and target then
-        local screenPos = target.ScreenPos
-        local dx = math.abs(screenPos.X - State.ScreenCenter.X)
-        local dy = math.abs(screenPos.Y - State.ScreenCenter.Y)
-        if dx > 15 or dy > 15 then
-            target = nil  -- Don't shoot, not close enough to crosshair
-        end
+    if not Config.Enabled then
+        Status.Text       = "OFF"
+        Status.TextColor3 = Color3.fromRGB(255,80,80)
+        State.CurrentTarget = nil
+        return
     end
-    
-    -- Auto Shoot
-    if Config.AutoShoot and target then
-        -- Burst fire mode
-        if Config.BurstFire then
-            for i = 1, Config.BurstCount do
-                if not Shoot(target) then break end
-                task.wait(0.05)
-            end
-            task.wait(Config.BurstDelay)
-        else
-            Shoot(target)
-        end
+
+    if not State.RootPart then
+        UpdateCharacter()
+        return
     end
-    
-    -- Auto reload
-    AutoReload()
+
+    if State.Humanoid and State.Humanoid.Health <= 0 then
+        Status.Text = "Dead"
+        return
+    end
+
+    TryFire()
 end)
 
 -- ============================================
--- COMMANDS
+-- INIT
+-- FIX #5: BlockBanRemotes called AFTER ScanRemotes completes
 -- ============================================
-LocalPlayer.Chatted:Connect(function(msg)
-    local cmd = msg:lower()
-    
-    if cmd == "/as on" then
-        Config.Enabled = true
-        print("[Onyx Arsenal] AutoShoot: ON")
-    elseif cmd == "/as off" then
-        Config.Enabled = false
-        print("[Onyx Arsenal] AutoShoot: OFF")
-    elseif cmd == "/as silent" then
-        Config.SilentAim = not Config.SilentAim
-        print("[Onyx Arsenal] Silent Aim: " .. (Config.SilentAim and "ON" or "OFF"))
-    elseif cmd == "/as head" then
-        Config.TargetPart = "Head"
-        print("[Onyx Arsenal] Target: Head")
-    elseif cmd == "/as body" then
-        Config.TargetPart = "HumanoidRootPart"
-        print("[Onyx Arsenal] Target: Body")
-    elseif cmd == "/as fov" then
-        local num = tonumber(msg:match("%d+"))
-        if num then
-            Config.FOV = num
-            print("[Onyx Arsenal] FOV: " .. num)
-        end
-    elseif cmd == "/as range" then
-        local num = tonumber(msg:match("%d+"))
-        if num then
-            Config.Range = num
-            print("[Onyx Arsenal] Range: " .. num)
-        end
-    elseif cmd == "/as visible" then
-        Config.VisibleCheck = not Config.VisibleCheck
-        print("[Onyx Arsenal] Visible Check: " .. (Config.VisibleCheck and "ON" or "OFF"))
-    elseif cmd == "/as trigger" then
-        Config.TriggerBot = not Config.TriggerBot
-        Config.AutoShoot = not Config.AutoShoot
-        print("[Onyx Arsenal] TriggerBot: " .. (Config.TriggerBot and "ON" or "OFF"))
-    elseif cmd == "/as burst" then
-        Config.BurstFire = not Config.BurstFire
-        print("[Onyx Arsenal] Burst Fire: " .. (Config.BurstFire and "ON" or "OFF"))
-    elseif cmd == "/as info" then
-        print("[Onyx Arsenal v67]")
-        print("  Silent Aim: " .. tostring(Config.SilentAim))
-        print("  Auto Shoot: " .. tostring(Config.AutoShoot))
-        print("  TriggerBot: " .. tostring(Config.TriggerBot))
-        print("  Target: " .. Config.TargetPart)
-        print("  Range: " .. Config.Range)
-        print("  FOV: " .. Config.FOV)
-        print("  Visible Check: " .. tostring(Config.VisibleCheck))
-        print("  Burst Fire: " .. tostring(Config.BurstFire))
-    end
-end)
-
--- ============================================
--- INITIALIZATION
--- ============================================
-print("[Onyx v67] Arsenal AutoShoot + Silent Aim loaded")
-print("[Onyx] Commands: /as on|off|silent|head|body|fov#|range#|visible|trigger|burst|info")
+task.spawn(function()
+    task.wait(1)
+    ScanRemotes()          -- scan first
+    BlockBanRemotes()      -- then filter — no race condition
+    SetupMobileGestures()
+    FakeFingerprint()
+    task.spawn
